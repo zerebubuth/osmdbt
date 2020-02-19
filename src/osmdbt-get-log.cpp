@@ -8,11 +8,32 @@
 #include <osmium/io/detail/read_write.hpp>
 #include <osmium/util/verbose_output.hpp>
 
+#include <boost/optional.hpp>
+
 #include <algorithm>
 #include <ctime>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <cstdlib>
+
+namespace {
+
+/* Parse a PostgreSQL LSN as a 64-bit integer. The PG docs state that LSNs are
+ * written as two 32-bit hex numbers separated by a slash.
+ */
+uint64_t parse_lsn(const char *s) {
+    char *end = const_cast<char *>(s);
+    const uint32_t a = std::strtoul(s, &end, 16);
+    if (*end != '/') { throw std::invalid_argument("invalid LSN"); }
+    ++end;
+    const uint32_t b = std::strtoul(end, nullptr, 16);
+
+    return (uint64_t(a) << 32) | uint64_t(b);
+}
+
+} // namespace
+
 
 class GetLogOptions : public Options
 {
@@ -22,6 +43,10 @@ public:
     {}
 
     bool catchup() const noexcept { return m_catchup; }
+    boost::optional<uint64_t> ignore_earlier_than() const noexcept {
+        return m_ignore_earlier_than;
+    }
+    bool empty_is_ok() const noexcept { return m_empty_is_ok; }
 
 private:
     void add_command_options(po::options_description &desc) override
@@ -31,6 +56,12 @@ private:
         // clang-format off
         opts_cmd.add_options()
             ("catchup", "Commit changes when they have been logged successfully");
+        opts_cmd.add_options()
+            ("ignore-earlier-than", po::value<std::string>(),
+             "Ignore any commits with LSNs equal to or earlier than this.");
+        opts_cmd.add_options()
+            ("empty-is-ok", "An empty set of changes is OK, and the exit code "
+             "can be zero in this case.");
         // clang-format on
 
         desc.add(opts_cmd);
@@ -42,9 +73,18 @@ private:
         if (vm.count("catchup")) {
             m_catchup = true;
         }
+        if (vm.count("ignore-earlier-than")) {
+          std::string lsn_str = vm["ignore-earlier-than"].as<std::string>();
+          m_ignore_earlier_than = parse_lsn(lsn_str.c_str());
+        }
+        if (vm.count("empty-is-ok")) {
+            m_empty_is_ok = true;
+        }
     }
 
     bool m_catchup = false;
+    boost::optional<uint64_t> m_ignore_earlier_than;
+    bool m_empty_is_ok = false;
 }; // class GetLogOptions
 
 static void write_data_to_file(std::string const &data,
@@ -98,7 +138,7 @@ bool app(osmium::VerboseOutput &vout, Config const &config,
 
     if (result.empty()) {
         vout << "No changes found.\n";
-        return false;
+        return options.empty_is_ok();
     }
 
     vout << "There are " << result.size() << " changes.\n";
@@ -110,6 +150,12 @@ bool app(osmium::VerboseOutput &vout, Config const &config,
 
     for (auto const &row : result) {
         char const *const message = row[2].c_str();
+
+        uint64_t lsn_val = parse_lsn(row[0].c_str());
+        if (options.ignore_earlier_than() &&
+          (lsn_val <= options.ignore_earlier_than())) {
+            continue;
+        }
 
         data.append(row[0].c_str());
         data += ' ';
