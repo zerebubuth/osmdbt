@@ -2,6 +2,27 @@
 #include "config.hpp"
 #include "exception.hpp"
 
+namespace {
+void set_config(const YAML::Node &n, std::string &config) {
+    if (n) {
+        if (n.IsNull()) {
+            config = "";
+        } else {
+            config = n.as<std::string>();
+        }
+    }
+}
+
+void build_str(std::string &str, const std::string &key, const std::string &val) {
+    if (!val.empty()) {
+        str += " ";
+        str += key;
+        str += "=";
+        str += val;
+    }
+}
+} // namespace
+
 Config::Config(Options const &options, osmium::VerboseOutput &vout)
 : m_config{YAML::LoadFile(options.config_file())}
 {
@@ -13,31 +34,17 @@ Config::Config(Options const &options, osmium::VerboseOutput &vout)
         throw config_error{"'database' entry must be a Map."};
     }
 
-    if (m_config["database"]["host"]) {
-        m_db_host = m_config["database"]["host"].as<std::string>();
-    }
-    if (m_config["database"]["dbname"]) {
-        m_db_dbname = m_config["database"]["dbname"].as<std::string>();
-    }
-    if (m_config["database"]["user"]) {
-        m_db_user = m_config["database"]["user"].as<std::string>();
-    }
-    if (m_config["database"]["password"]) {
-        m_db_password = m_config["database"]["password"].as<std::string>();
-    }
+    set_config(m_config["database"]["host"], m_db_host);
+    set_config(m_config["database"]["dbname"], m_db_dbname);
+    set_config(m_config["database"]["user"], m_db_user);
+    set_config(m_config["database"]["password"], m_db_password);
 
-    m_db_connection += m_db_host;
-    m_db_connection += " dbname=";
-    m_db_connection += m_db_dbname;
-    m_db_connection += " user=";
-    m_db_connection += m_db_user;
-    m_db_connection += " password=";
-    m_db_connection += m_db_password;
+    build_str(m_db_connection, "host", m_db_host);
+    build_str(m_db_connection, "dbname", m_db_dbname);
+    build_str(m_db_connection, "user", m_db_user);
+    build_str(m_db_connection, "password", m_db_password);
 
-    if (m_config["database"]["replication_slot"]) {
-        m_replication_slot =
-            m_config["database"]["replication_slot"].as<std::string>();
-    }
+    set_config(m_config["database"]["replication_slot"], m_replication_slot);
 
     if (m_config["log_dir"]) {
         m_log_dir = m_config["log_dir"].as<std::string>();

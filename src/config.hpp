@@ -18,7 +18,7 @@ class Config
     std::string m_db_user{"osm"};
     std::string m_db_password{"osm"};
 
-    std::string m_db_connection{"host="};
+    std::string m_db_connection;
     std::string m_replication_slot;
 
     std::string m_log_dir{"/tmp"};
